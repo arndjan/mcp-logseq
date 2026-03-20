@@ -353,6 +353,52 @@ class UpdatePageToolHandler(ToolHandler):
                 text=f"❌ Failed to update page '{page_name}': {str(e)}"
             )]
 
+class AddBlockTagToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("add_block_tag")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description="Add a tag to a LogSeq block (DB-mode). Uses upsertBlockProperty with :block/tags to set tags without polluting block content.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "block_uuid": {
+                        "type": "string",
+                        "description": "UUID of the block to tag"
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Tag name to add (e.g. 'cg', 'todo')"
+                    }
+                },
+                "required": ["block_uuid", "tag"]
+            }
+        )
+
+    def run_tool(self, args: dict) -> list[TextContent]:
+        if "block_uuid" not in args or "tag" not in args:
+            raise RuntimeError("block_uuid and tag arguments required")
+
+        block_uuid = args["block_uuid"]
+        tag = args["tag"]
+
+        try:
+            api = logseq.LogSeq(api_key=api_key)
+            result = api.upsert_block_property(block_uuid, ":block/tags", tag)
+
+            return [TextContent(
+                type="text",
+                text=f"✅ Tag '{tag}' added to block '{block_uuid}'"
+            )]
+        except Exception as e:
+            logger.error(f"Failed to add tag: {str(e)}")
+            return [TextContent(
+                type="text",
+                text=f"❌ Failed to add tag '{tag}' to block '{block_uuid}': {str(e)}"
+            )]
+
 class SearchToolHandler(ToolHandler):
     def __init__(self):
         super().__init__("search")

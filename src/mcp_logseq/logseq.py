@@ -216,6 +216,29 @@ class LogSeq():
             logger.error(f"Error deleting page '{page_name}': {str(e)}")
             raise
     
+    def upsert_block_property(self, block_uuid: str, property_name: str, value: Any) -> Any:
+        """Upsert a property on a block. Used for DB-mode :block/tags etc."""
+        url = self.get_base_url()
+        logger.info(f"Upserting property '{property_name}' on block '{block_uuid}'")
+
+        try:
+            response = requests.post(
+                url,
+                headers=self._get_headers(),
+                json={
+                    "method": "logseq.Editor.upsertBlockProperty",
+                    "args": [block_uuid, property_name, value]
+                },
+                verify=self.verify_ssl,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except Exception as e:
+            logger.error(f"Error upserting block property: {str(e)}")
+            raise
+
     def update_page(self, page_name: str, content: str = None, properties: dict = None) -> Any:
         """Update a LogSeq page with new content and/or properties."""
         url = self.get_base_url()
