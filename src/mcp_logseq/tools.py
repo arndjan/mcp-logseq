@@ -599,6 +599,122 @@ class DeleteBlockToolHandler(ToolHandler):
             )]
 
 
+class GetBlockToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("get_block")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description="Get a block from LogSeq by its UUID or database ID. Returns content, properties, children, and metadata. Useful for inspecting blocks returned by the query tool (which returns database IDs).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "block_id": {
+                        "type": "string",
+                        "description": "Block UUID (string) or database ID (integer as string). The query tool returns database IDs.",
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": "Output format (text or json)",
+                        "enum": ["text", "json"],
+                        "default": "text",
+                    },
+                },
+                "required": ["block_id"],
+            },
+        )
+
+    def run_tool(self, args: dict) -> list[TextContent]:
+        if "block_id" not in args:
+            raise RuntimeError("block_id argument required")
+
+        block_id_raw = args["block_id"]
+
+        # Support integer database IDs (convert string to int if numeric)
+        try:
+            block_id: str | int = int(block_id_raw)
+        except (ValueError, TypeError):
+            block_id = block_id_raw
+
+        try:
+            api = _make_api()
+            block = api.get_block(block_id)
+
+            if not block:
+                return [TextContent(
+                    type="text",
+                    text=f"Block '{block_id_raw}' not found.",
+                )]
+
+            # Handle JSON format request
+            if args.get("format") == "json":
+                return [TextContent(type="text", text=json.dumps(block, indent=2))]
+
+            # Format as readable text
+            content_parts = []
+
+            # Block metadata
+            uuid = block.get("uuid", "")
+            db_id = block.get("id", "")
+            content_parts.append(f"Block UUID: {uuid}")
+            content_parts.append(f"Block DB ID: {db_id}")
+
+            # Page reference — resolve name if only ID is present
+            page = block.get("page", {})
+            if isinstance(page, dict):
+                page_name = page.get("originalName") or page.get("name", "")
+                if not page_name and page.get("id"):
+                    try:
+                        page_info = api.get_page(page["id"])
+                        if page_info:
+                            page_name = page_info.get("originalName") or page_info.get("name") or str(page["id"])
+                    except Exception:
+                        page_name = str(page["id"])
+                content_parts.append(f"Page: {page_name}")
+
+            # Marker/status
+            marker = block.get("marker")
+            if marker:
+                content_parts.append(f"Marker: {marker}")
+
+            # Priority
+            priority = block.get("priority")
+            if priority:
+                content_parts.append(f"Priority: {priority}")
+
+            # Tags
+            tags = block.get("tags", [])
+            if tags:
+                tag_names = [t.get("originalName") or t.get("name", "") for t in tags if isinstance(t, dict)]
+                if tag_names:
+                    content_parts.append(f"Tags: {', '.join(tag_names)}")
+
+            content_parts.append("")
+
+            # Block content tree (reuse GetPageContentToolHandler formatter)
+            db_properties = {}
+            if _db_mode:
+                try:
+                    db_properties = api.get_blocks_db_properties([block])
+                except Exception as e:
+                    logger.warning(f"Could not fetch DB-mode properties: {e}")
+
+            block_lines = GetPageContentToolHandler._format_block_tree(
+                block, 0, -1, db_properties
+            )
+            content_parts.extend(block_lines)
+
+            return [TextContent(type="text", text="\n".join(content_parts))]
+
+        except Exception as e:
+            logger.error(f"Failed to get block: {str(e)}")
+            return [TextContent(
+                type="text",
+                text=f"Failed to get block '{block_id_raw}': {str(e)}",
+            )]
+
+
 class UpdateBlockToolHandler(ToolHandler):
     def __init__(self):
         super().__init__("update_block")
@@ -1392,6 +1508,53 @@ class InsertNestedBlockToolHandler(ToolHandler):
             )]
 
 
+class AddBlockTagToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("add_block_tag")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description="Add a tag (class) to a block in Logseq DB-mode. Sets a proper DB-mode tag reference on the block without putting #tag in the block content.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "block_uuid": {
+                        "type": "string",
+                        "description": "UUID of the block to tag",
+                    },
+                    "tag_name": {
+                        "type": "string",
+                        "description": "Name of the tag/class to add (e.g. 'Claude Code sessie')",
+                    },
+                },
+                "required": ["block_uuid", "tag_name"],
+            },
+        )
+
+    def run_tool(self, args: dict) -> list[TextContent]:
+        if "block_uuid" not in args or "tag_name" not in args:
+            raise RuntimeError("block_uuid and tag_name arguments required")
+
+        block_uuid = args["block_uuid"]
+        tag_name = args["tag_name"]
+
+        try:
+            api = _make_api()
+            api.add_block_tag(block_uuid, tag_name)
+
+            return [TextContent(
+                type="text",
+                text=f"Successfully added tag '{tag_name}' to block '{block_uuid}'",
+            )]
+        except Exception as e:
+            logger.error(f"Failed to add block tag: {str(e)}")
+            return [TextContent(
+                type="text",
+                text=f"Failed to add tag '{tag_name}' to block '{block_uuid}': {str(e)}",
+            )]
+
+
 class SetBlockPropertiesToolHandler(ToolHandler):
     def __init__(self):
         super().__init__("set_block_properties")
@@ -1455,4 +1618,152 @@ class SetBlockPropertiesToolHandler(ToolHandler):
             return [TextContent(
                 type="text",
                 text=f"❌ Failed to set block properties: {str(e)}",
+            )]
+
+
+class GetBlocksByTagToolHandler(ToolHandler):
+    """Get all blocks that have a specific tag (DB-mode class/tag)."""
+
+    def __init__(self):
+        super().__init__("get_blocks_by_tag")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description="Get all blocks tagged with a specific tag (Logseq DB-mode class). Runs a DSL query to find blocks, then fetches full content for each. Useful for retrieving all items of a certain type (e.g. all blocks tagged 'cg').",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tag_name": {
+                        "type": "string",
+                        "description": "Tag name to search for (e.g. 'cg', 'project')",
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": "Output format (text or json)",
+                        "enum": ["text", "json"],
+                        "default": "text",
+                    },
+                },
+                "required": ["tag_name"],
+            },
+        )
+
+    def run_tool(self, args: dict) -> list[TextContent]:
+        if "tag_name" not in args:
+            raise RuntimeError("tag_name argument required")
+
+        tag_name = args["tag_name"]
+        output_format = args.get("format", "text")
+
+        try:
+            api = _make_api()
+
+            # Query for blocks with this tag
+            query = f'(property :block/tags "{tag_name}")'
+            logger.info(f"Querying blocks by tag: {query}")
+            query_results = api.query_dsl(query)
+
+            if not query_results:
+                return [TextContent(
+                    type="text",
+                    text=f"No blocks found with tag '{tag_name}'.",
+                )]
+
+            # Fetch full block details for each result
+            blocks = []
+            for item in query_results:
+                if not isinstance(item, dict):
+                    continue
+                block_id = item.get("id") or item.get("uuid")
+                if not block_id:
+                    continue
+                try:
+                    block = api.get_block(block_id)
+                    if block:
+                        blocks.append(block)
+                except Exception as e:
+                    logger.warning(f"Could not fetch block {block_id}: {e}")
+
+            if not blocks:
+                return [TextContent(
+                    type="text",
+                    text=f"Found {len(query_results)} results for tag '{tag_name}' but could not fetch block details.",
+                )]
+
+            # JSON output
+            if output_format == "json":
+                return [TextContent(type="text", text=json.dumps(blocks, indent=2))]
+
+            # Text output
+            content_parts = []
+            content_parts.append(f"Blocks tagged '{tag_name}': {len(blocks)} found\n")
+
+            # Pre-fetch DB properties if in DB mode
+            db_properties = {}
+            if _db_mode:
+                try:
+                    db_properties = api.get_blocks_db_properties(blocks)
+                except Exception as e:
+                    logger.warning(f"Could not fetch DB-mode properties: {e}")
+
+            for i, block in enumerate(blocks):
+                if i > 0:
+                    content_parts.append("---")
+
+                # Block content
+                block_content = block.get("content", "").strip()
+                if block_content:
+                    content_parts.append(f"Content: {block_content}")
+
+                # Page reference
+                page = block.get("page", {})
+                if isinstance(page, dict):
+                    page_name = page.get("originalName") or page.get("name", "")
+                    if not page_name and page.get("id"):
+                        try:
+                            page_info = api.get_page(page["id"])
+                            if page_info:
+                                page_name = page_info.get("originalName") or page_info.get("name") or str(page["id"])
+                        except Exception:
+                            page_name = str(page["id"])
+                    if page_name:
+                        content_parts.append(f"Page: {page_name}")
+
+                # Properties — DB mode resolved names
+                block_db_id = block.get("id")
+                if _db_mode and block_db_id and block_db_id in db_properties:
+                    props = db_properties[block_db_id]
+                    if props:
+                        props_str = ", ".join(f"{k}: {v}" for k, v in props.items())
+                        content_parts.append(f"Properties: {props_str}")
+                else:
+                    # Fallback: propertiesTextValues or properties
+                    props = block.get("propertiesTextValues", {}) or block.get("properties", {})
+                    if props:
+                        props_str = ", ".join(f"{k}: {v}" for k, v in props.items())
+                        content_parts.append(f"Properties: {props_str}")
+
+                # Children
+                children = block.get("children", [])
+                if children:
+                    child_lines = []
+                    for child in children:
+                        if isinstance(child, dict):
+                            child_content = child.get("content", "").strip()
+                            if child_content:
+                                child_lines.append(f"  - {child_content}")
+                    if child_lines:
+                        content_parts.append("Children:")
+                        content_parts.extend(child_lines)
+
+                content_parts.append("")
+
+            return [TextContent(type="text", text="\n".join(content_parts))]
+
+        except Exception as e:
+            logger.error(f"Failed to get blocks by tag: {str(e)}")
+            return [TextContent(
+                type="text",
+                text=f"Failed to get blocks by tag '{tag_name}': {str(e)}",
             )]
