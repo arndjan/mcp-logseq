@@ -24,3 +24,6 @@ project_context.md
 # IDE and OS files
 .vscode/
 **/.DS_Store
+
+# Prevent accidental literal ~ directories
+~

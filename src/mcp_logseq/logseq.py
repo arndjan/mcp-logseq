@@ -87,6 +87,62 @@ class LogSeq:
             logger.error(f"Error listing pages: {str(e)}")
             raise
 
+    def get_page(self, page_id: str | int) -> Any:
+        """Get a LogSeq page by name (string) or database ID (integer).
+
+        Returns:
+            Page dict with name, originalName, id, etc. or None.
+        """
+        url = self.get_base_url()
+        logger.info(f"Getting page '{page_id}'")
+
+        try:
+            response = requests.post(
+                url,
+                headers=self._get_headers(),
+                json={"method": "logseq.Editor.getPage", "args": [page_id]},
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except Exception as e:
+            logger.error(f"Error getting page '{page_id}': {str(e)}")
+            raise
+
+    def get_block(self, block_id: str | int) -> Any:
+        """Get a LogSeq block by UUID (string) or database ID (integer).
+
+        Args:
+            block_id: Block UUID string or integer database ID.
+
+        Returns:
+            Block dict with content, properties, children, page, etc.
+        """
+        url = self.get_base_url()
+        logger.info(f"Getting block '{block_id}'")
+
+        try:
+            response = requests.post(
+                url,
+                headers=self._get_headers(),
+                json={
+                    "method": "logseq.Editor.getBlock",
+                    "args": [block_id, {"includeChildren": True}],
+                },
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.info(f"Successfully got block '{block_id}'")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error getting block '{block_id}': {str(e)}")
+            raise
+
     def get_page_content(self, page_name: str) -> Any:
         """Get content of a LogSeq page including metadata and block content."""
         url = self.get_base_url()
@@ -1198,6 +1254,36 @@ class LogSeq:
 
         except Exception as e:
             logger.error(f"Error getting backlinks: {str(e)}")
+            raise
+
+    def add_block_tag(self, block_uuid: str, tag_name: str) -> None:
+        """Add a tag (class) to a block in DB-mode without modifying block content.
+
+        Uses upsertBlockProperty with ":block/tags" to set a proper DB-mode
+        tag reference on the block.
+
+        Args:
+            block_uuid: UUID of the block to tag
+            tag_name: Name of the tag/class to add
+        """
+        url = self.get_base_url()
+        logger.info(f"Adding tag '{tag_name}' to block '{block_uuid}'")
+
+        try:
+            response = requests.post(
+                url,
+                headers=self._get_headers(),
+                json={
+                    "method": "logseq.Editor.upsertBlockProperty",
+                    "args": [block_uuid, ":block/tags", tag_name],
+                },
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            logger.info(f"Successfully added tag '{tag_name}' to block '{block_uuid}'")
+        except Exception as e:
+            logger.error(f"Failed to add tag '{tag_name}' to block {block_uuid}: {e}")
             raise
 
     def insert_block_as_child(
