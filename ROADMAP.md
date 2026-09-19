@@ -1,5 +1,38 @@
 # LogSeq MCP Server Roadmap
 
+## Status-update 19 sep 2026
+
+**Conclusie: deze repo is niet dood of vervangen — het is de broncode van de live Hetzner-gateway-service.**
+
+Sinds 27 juli 2026 draait de Logseq-MCP-integratie niet meer als desktop-stdio-server, maar als HTTP-gateway op Hetzner:
+`https://mcp.siskin.amsterdam/logseq/mcp/`, achter systemd-units `mcp-logseq-http.service` (deze Python-server) en
+`mcp-logseq-bridge.service` (Node-bridge voor de headless webclient). Geverifieerd in `~/.claude.json`: de oude stdio-entry
+`mcp-logseq` staat er inderdaad niet meer in — alleen nog `logseq-web`, type `http`, wijzend naar exact die Hetzner-URL.
+
+Maar: de service draait op de codebase van **deze** repo, niet op een ander project. Bewijs:
+- `http_server.py` (root van deze repo, momenteel **ongecommit**) is letterlijk de ASGI-wrapper die de tool-handlers uit
+  `src/mcp_logseq/server.py` over streamable-HTTP serveert — met een docstring die de systemd-opzet, de Caddy-route
+  `/logseq/mcp/` en de bridge op poort 12316 expliciet beschrijft ("Mirrors the magister-rooster pattern").
+- `index.html` (ook ongecommit) is de gevendorde Logseq-webclient-shell die de bridge nodig heeft om tegen de cloud-synced
+  DB-graph te praten.
+- `git remote -v`: `origin` = `arndjan/mcp-logseq` (AJ's fork), `upstream` = `ergut/mcp-logseq` (het open-source
+  bovenstroomse project waarvan dit ooit is geforkt). De branch staat 2 commits vóór op `upstream/main`.
+
+Met andere woorden: dit ís niet "project A vervangen door project B" — het is dezelfde broncode die nu via een
+HTTP-wrapper op Hetzner draait in plaats van via lokale stdio in Claude Desktop/Code. De getrackte git-historie stopt bij
+29 maart 2026 (vóór de migratie); de HTTP/bridge-toevoeging (`http_server.py`, `index.html`) staat lokaal wel op schijf
+maar nog niet in git — dat zijn (zeer bewust met rust gelaten) de 2 ongecommitte wijzigingen die al in de werkboom stonden
+vóór deze roadmap-update.
+
+**Todoist**: er bestaat een apart Todoist-project "mcp-logseq" (project-ID `6gCVJ7PHGF64p787`, onder Development). Dit
+project bevat momenteel **0 open taken**. Mogelijk dubbelop met de Hetzner-service-tracking elders — dat is aan AJ om te
+beoordelen, hier niet gewijzigd.
+
+Het onderstaande oorspronkelijke plan (laatst bewerkt 4 nov 2025) is dus gedateerd: het beschrijft de repo nog als
+losstaande desktop-stdio-server, niet als bron van een live gateway-service. Bewaard als historische referentie.
+
+---
+
 ## Implemented Features
 
 ### Core Functionality
